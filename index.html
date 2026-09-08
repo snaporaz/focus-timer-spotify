@@ -200,7 +200,7 @@
   // ---------- Config ----------
   const CLIENT_ID = '60cef4af9c614dcf97ce9cae1c518b68';
   const REDIRECT_URI = window.location.origin + window.location.pathname;
-  const SCOPES = 'user-modify-playback-state user-read-playback-state';
+  const SCOPES = 'user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative';
   const TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
   const AUTHORIZE_ENDPOINT = 'https://accounts.spotify.com/authorize';
   const API_BASE = 'https://api.spotify.com/v1';
@@ -439,6 +439,54 @@
     }
   }
 
+  async function pausePlayback() {
+    const select = document.getElementById('device-select');
+    const deviceId = select.value;
+    if (!deviceId) return;
+
+    try {
+      const res = await spotifyFetch('/me/player/pause?device_id=' + encodeURIComponent(deviceId), {
+        method: 'PUT'
+      });
+      if (res.status !== 204 && !res.ok) {
+        const errData = await res.json().catch(function() { return {}; });
+        throw new Error((errData.error && errData.error.message) || ('HTTP ' + res.status));
+      }
+    } catch (e) {
+      showTimerStatus('No se pudo pausar Spotify al terminar: ' + e.message, 'error');
+    }
+  }
+
+  // ---------- Playlists del usuario (para el selector por fase) ----------
+  let userPlaylists = [];
+
+  async function loadPlaylists() {
+    const token = await getValidAccessToken();
+    if (!token) return;
+
+    userPlaylists = [];
+    let url = API_BASE + '/me/playlists?limit=50';
+
+    try {
+      while (url) {
+        const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.status === 403) {
+          showSpotifyStatus('Falta el permiso de playlists — desconectate y volvé a conectar con Spotify para habilitarlo.', 'error');
+          return;
+        }
+        if (!res.ok) throw new Error('No se pudieron cargar tus playlists (' + res.status + ')');
+        const data = await res.json();
+        data.items.forEach(function(pl) {
+          if (pl) userPlaylists.push({ name: pl.name, uri: pl.uri });
+        });
+        url = data.next;
+      }
+      renderPhaseList(readPhasesFromForm());
+    } catch (e) {
+      showSpotifyStatus('Error cargando playlists: ' + e.message, 'error');
+    }
+  }
+
   // ---------- UI: Spotify connection state ----------
   function showSpotifyStatus(msg, type) {
     const el = document.getElementById('spotify-status');
@@ -459,6 +507,7 @@
     document.getElementById('spotify-connected').classList.remove('hidden');
     showSpotifyStatus('Conectado a Spotify.', 'ok');
     loadDevices();
+    loadPlaylists();
   }
 
   function onSpotifyDisconnected() {
@@ -524,8 +573,15 @@
           '<input type="number" data-field="seconds" placeholder="seg" min="0" max="59" value="' + phase.seconds + '">' +
         '</div>' +
         '<input type="text" data-field="uri" placeholder="Spotify URI (opcional) — spotify:playlist:... o spotify:track:..." value="' + escapeAttr(phase.uri || '') + '">' +
+        '<select class="playlist-select">' + playlistOptionsHtml(phase.uri) + '</select>' +
         '<button class="remove-phase" data-idx="' + idx + '">Quitar fase</button>';
       list.appendChild(item);
+
+      item.querySelector('.playlist-select').addEventListener('change', function() {
+        if (this.value) {
+          item.querySelector('[data-field="uri"]').value = this.value;
+        }
+      });
     });
 
     list.querySelectorAll('.remove-phase').forEach(function(btn) {
@@ -536,6 +592,18 @@
         renderPhaseList(phases);
       });
     });
+  }
+
+  function playlistOptionsHtml(currentUri) {
+    if (userPlaylists.length === 0) {
+      return '<option value="">Conectate a Spotify para elegir de tus playlists</option>';
+    }
+    let html = '<option value="">-- Elegir playlist --</option>';
+    userPlaylists.forEach(function(pl) {
+      const selected = pl.uri === currentUri ? ' selected' : '';
+      html += '<option value="' + escapeAttr(pl.uri) + '"' + selected + '>' + escapeAttr(pl.name) + '</option>';
+    });
+    return html;
   }
 
   function escapeAttr(str) {
@@ -801,6 +869,7 @@
       document.getElementById('next-phase-label').textContent = '';
       showTimerStatus('Protocolo terminado.', 'ok');
       setButtonsIdle();
+      pausePlayback();
     }
   };
 
