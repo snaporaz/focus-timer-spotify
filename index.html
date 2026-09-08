@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Focus Timer + Spotify</title>
+<style>
+  :root {
+    --bg: #121212;
+    --surface: #1e1e1e;
+    --surface-2: #282828;
+    --text: #f5f5f5;
+    --text-dim: #a0a0a0;
+    --accent: #1db954;
+    --accent-dim: #14833b;
+    --danger: #e74c3c;
+    --border: #333;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  .subtitle { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 20px; }
+  .card {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+  }
+  .card h2 { font-size: 0.95rem; margin: 0 0 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  button {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 24px;
+    padding: 10px 20px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button:hover { background: #1ed760; }
+  button:disabled { background: var(--surface-2); color: var(--text-dim); cursor: not-allowed; }
+  button.secondary { background: var(--surface-2); color: var(--text); }
+  button.secondary:hover { background: #333; }
+  button.danger { background: var(--danger); color: #fff; }
+  select, input[type=text], input[type=number] {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    width: 100%;
+  }
+  label { font-size: 0.8rem; color: var(--text-dim); display: block; margin-bottom: 4px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .row > * { flex: 1; }
+  .status { font-size: 0.8rem; padding: 8px 10px; border-radius: 6px; margin-top: 8px; }
+  .status.ok { background: rgba(29,185,84,0.15); color: var(--accent); }
+  .status.error { background: rgba(231,76,60,0.15); color: #ff7b6b; }
+  .status.info { background: rgba(255,255,255,0.08); color: var(--text-dim); }
+  .hidden { display: none !important; }
+
+  .phase-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  .phase-item {
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .phase-item .fields { display: flex; gap: 6px; }
+  .phase-item .fields input { min-width: 0; }
+  .phase-item .fields input[data-field="name"] { flex: 2; }
+  .phase-item .fields input[data-field="minutes"] { flex: 1; }
+  .phase-item .fields input[data-field="seconds"] { flex: 1; }
+  .phase-item input[data-field="uri"] { font-size: 0.75rem; }
+  .phase-item .remove-phase { background: transparent; color: var(--danger); padding: 4px 8px; font-size: 0.75rem; }
+
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .presets button { font-size: 0.8rem; padding: 6px 12px; }
+
+  .timer-display {
+    text-align: center;
+    padding: 24px 0;
+  }
+  .timer-display .phase-name { font-size: 1.1rem; color: var(--accent); margin-bottom: 4px; }
+  .timer-display .time { font-size: 3.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .timer-display .next-phase { font-size: 0.8rem; color: var(--text-dim); margin-top: 8px; }
+  .progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 16px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 1s linear;
+  }
+  .timer-controls { display: flex; gap: 8px; justify-content: center; margin-top: 20px; }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar button { font-size: 0.8rem; padding: 6px 12px; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Focus Timer + Spotify</h1>
+  <div class="subtitle">Timer por fases que cambia la música automáticamente</div>
+
+  <!-- Spotify connection -->
+  <div class="card" id="spotify-card">
+    <h2>Spotify</h2>
+    <div id="spotify-disconnected">
+      <button id="btn-connect">Conectar con Spotify</button>
+    </div>
+    <div id="spotify-connected" class="hidden">
+      <div class="row">
+        <div>
+          <label>Dispositivo activo</label>
+          <select id="device-select"></select>
+        </div>
+        <button class="secondary" id="btn-refresh-devices" style="flex:0 0 auto;">↻</button>
+      </div>
+      <button class="secondary" id="btn-disconnect">Desconectar</button>
+    </div>
+    <div id="spotify-status" class="status hidden"></div>
+  </div>
+
+  <!-- Timer -->
+  <div class="card">
+    <h2>Timer</h2>
+    <div class="timer-display">
+      <div class="phase-name" id="current-phase-name">Sin protocolo cargado</div>
+      <div class="time" id="time-display">00:00</div>
+      <div class="next-phase" id="next-phase-label"></div>
+      <div class="progress-bar"><div class="progress-bar-fill" id="progress-fill" style="width:0%"></div></div>
+    </div>
+    <div class="timer-controls">
+      <button id="btn-start">Iniciar</button>
+      <button class="secondary" id="btn-pause" disabled>Pausar</button>
+      <button class="secondary" id="btn-reset" disabled>Reiniciar</button>
+    </div>
+    <div id="timer-status" class="status hidden"></div>
+  </div>
+
+  <!-- Protocol editor -->
+  <div class="card">
+    <h2>Protocolo</h2>
+    <div class="presets">
+      <button class="secondary" data-preset="pomodoro">Pomodoro 25/5 x4</button>
+      <button class="secondary" data-preset="journaling">Journaling 3/3/3</button>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Nombre del protocolo</label>
+        <input type="text" id="protocol-name" value="Pomodoro 25/5 x4">
+      </div>
+      <div>
+        <label>Repeticiones del ciclo</label>
+        <input type="number" id="protocol-repeats" value="4" min="1" max="99">
+      </div>
+    </div>
+
+    <div class="phase-list" id="phase-list"></div>
+    <button class="secondary" id="btn-add-phase">+ Agregar fase</button>
+
+    <div class="toolbar" style="margin-top:16px;">
+      <button class="secondary" id="btn-save-preset">Guardar como preset</button>
+      <select id="saved-presets-select" style="flex:1;"></select>
+      <button class="secondary" id="btn-load-preset">Cargar</button>
+      <button class="danger" id="btn-delete-preset">Borrar</button>
+    </div>
+    <div class="toolbar">
+      <button class="secondary" id="btn-export">Exportar JSON</button>
+      <button class="secondary" id="btn-import-trigger">Importar JSON</button>
+      <input type="file" id="btn-import" accept="application/json">
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ---------- Config ----------
+  const CLIENT_ID = '60cef4af9c614dcf97ce9cae1c518b68';
+  const REDIRECT_URI = window.location.origin + window.location.pathname;
+  const SCOPES = 'user-modify-playback-state user-read-playback-state';
+  const TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
+  const AUTHORIZE_ENDPOINT = 'https://accounts.spotify.com/authorize';
+  const API_BASE = 'https://api.spotify.com/v1';
+
+  // ---------- PKCE helpers ----------
+  function base64UrlEncode(buffer) {
+    let str = '';
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function generateRandomString(length) {
+    const arr = new Uint8Array(length);
+    crypto.getRandomValues(arr);
+    return base64UrlEncode(arr.buffer).slice(0, length);
+  }
+
+  async function sha256(plain) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(plain);
+    return crypto.subtle.digest('SHA-256', data);
+  }
+
+  // ---------- Token storage ----------
+  const Tokens = {
+    get() {
+      try {
+        const raw = localStorage.getItem('spotify_tokens');
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    },
+    set(tokens) {
+      localStorage.setItem('spotify_tokens', JSON.stringify(tokens));
+    },
+    clear() {
+      localStorage.removeItem('spotify_tokens');
+    },
+    isExpired(tokens) {
+      if (!tokens || !tokens.obtained_at || !tokens.expires_in) return true;
+      const expiresAt = tokens.obtained_at + (tokens.expires_in * 1000);
+      return Date.now() > (expiresAt - 60000); // refresh 1 min early
+    }
+  };
+
+  // ---------- Auth flow ----------
+  async function startLogin() {
+    const verifier = generateRandomString(64);
+    const challengeBuffer = await sha256(verifier);
+    const challenge = base64UrlEncode(challengeBuffer);
+    const state = generateRandomString(16);
+
+    sessionStorage.setItem('pkce_verifier', verifier);
+    sessionStorage.setItem('pkce_state', state);
+
+    const params = new URLSearchParams({
+      client_id: CLIENT_ID,
+      response_type: 'code',
+      redirect_uri: REDIRECT_URI,
+      code_challenge_method: 'S256',
+      code_challenge: challenge,
+      scope: SCOPES,
+      state: state
+    });
+
+    window.location.href = AUTHORIZE_ENDPOINT + '?' + params.toString();
+  }
+
+  async function handleRedirectCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    const error = params.get('error');
+
+    if (error) {
+      showSpotifyStatus('Error de autorización: ' + error, 'error');
+      cleanUrl();
+      return;
+    }
+    if (!code) return;
+
+    const savedState = sessionStorage.getItem('pkce_state');
+    const verifier = sessionStorage.getItem('pkce_verifier');
+
+    if (!verifier || state !== savedState) {
+      showSpotifyStatus('Error: state mismatch, reintentá el login.', 'error');
+      cleanUrl();
+      return;
+    }
+
+    try {
+      const body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: REDIRECT_URI,
+        client_id: CLIENT_ID,
+        code_verifier: verifier
+      });
+
+      const res = await fetch(TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
+      });
+
+      if (!res.ok) throw new Error('Token exchange falló: ' + res.status);
+
+      const data = await res.json();
+      Tokens.set({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expires_in: data.expires_in,
+        obtained_at: Date.now()
+      });
+
+      sessionStorage.removeItem('pkce_verifier');
+      sessionStorage.removeItem('pkce_state');
+      cleanUrl();
+      onSpotifyConnected();
+    } catch (e) {
+      showSpotifyStatus('Error conectando con Spotify: ' + e.message, 'error');
+      cleanUrl();
+    }
+  }
+
+  function cleanUrl() {
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  async function refreshAccessToken() {
+    const tokens = Tokens.get();
+    if (!tokens || !tokens.refresh_token) return null;
+
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refresh_token,
+      client_id: CLIENT_ID
+    });
+
+    const res = await fetch(TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+
+    if (!res.ok) {
+      Tokens.clear();
+      return null;
+    }
+
+    const data = await res.json();
+    const newTokens = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || tokens.refresh_token,
+      expires_in: data.expires_in,
+      obtained_at: Date.now()
+    };
+    Tokens.set(newTokens);
+    return newTokens;
+  }
+
+  async function getValidAccessToken() {
+    let tokens = Tokens.get();
+    if (!tokens) return null;
+    if (Tokens.isExpired(tokens)) {
+      tokens = await refreshAccessToken();
+    }
+    return tokens ? tokens.access_token : null;
+  }
+
+  async function spotifyFetch(path, options) {
+    options = options || {};
+    const token = await getValidAccessToken();
+    if (!token) throw new Error('No hay sesión de Spotify activa.');
+
+    const res = await fetch(API_BASE + path, Object.assign({}, options, {
+      headers: Object.assign({}, options.headers, {
+        'Authorization': 'Bearer ' + token
+      })
+    }));
+    return res;
+  }
+
+  // ---------- Spotify device / playback ----------
+  async function loadDevices() {
+    try {
+      const res = await spotifyFetch('/me/player/devices');
+      if (!res.ok) throw new Error('No se pudieron leer los dispositivos (' + res.status + ')');
+      const data = await res.json();
+      const select = document.getElementById('device-select');
+      select.innerHTML = '';
+      if (!data.devices || data.devices.length === 0) {
+        const opt = document.createElement('option');
+        opt.textContent = 'Sin dispositivos activos — abrí Spotify en algún lado';
+        select.appendChild(opt);
+        return;
+      }
+      data.devices.forEach(function(d) {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = d.name + (d.is_active ? ' (activo)' : '');
+        if (d.is_active) opt.selected = true;
+        select.appendChild(opt);
+      });
+    } catch (e) {
+      showSpotifyStatus('Error cargando dispositivos: ' + e.message, 'error');
+    }
+  }
+
+  async function playOnDevice(uri) {
+    const select = document.getElementById('device-select');
+    const deviceId = select.value;
+    if (!deviceId) {
+      showTimerStatus('Sin dispositivo seleccionado, no se pudo cambiar la música.', 'error');
+      return;
+    }
+
+    try {
+      const isTrack = uri.includes(':track:');
+      const body = isTrack
+        ? { uris: [uri] }
+        : { context_uri: uri, offset: { position: 0 } };
+
+      const res = await spotifyFetch('/me/player/play?device_id=' + encodeURIComponent(deviceId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (res.status !== 204 && !res.ok) {
+        const errData = await res.json().catch(function() { return {}; });
+        throw new Error((errData.error && errData.error.message) || ('HTTP ' + res.status));
+      }
+    } catch (e) {
+      showTimerStatus('Error cambiando la música: ' + e.message, 'error');
+    }
+  }
+
+  // ---------- UI: Spotify connection state ----------
+  function showSpotifyStatus(msg, type) {
+    const el = document.getElementById('spotify-status');
+    el.textContent = msg;
+    el.className = 'status ' + type;
+    el.classList.remove('hidden');
+  }
+
+  function showTimerStatus(msg, type) {
+    const el = document.getElementById('timer-status');
+    el.textContent = msg;
+    el.className = 'status ' + type;
+    el.classList.remove('hidden');
+  }
+
+  function onSpotifyConnected() {
+    document.getElementById('spotify-disconnected').classList.add('hidden');
+    document.getElementById('spotify-connected').classList.remove('hidden');
+    showSpotifyStatus('Conectado a Spotify.', 'ok');
+    loadDevices();
+  }
+
+  function onSpotifyDisconnected() {
+    document.getElementById('spotify-disconnected').classList.remove('hidden');
+    document.getElementById('spotify-connected').classList.add('hidden');
+  }
+
+  document.getElementById('btn-connect').addEventListener('click', startLogin);
+  document.getElementById('btn-disconnect').addEventListener('click', function() {
+    Tokens.clear();
+    onSpotifyDisconnected();
+  });
+  document.getElementById('btn-refresh-devices').addEventListener('click', loadDevices);
+
+  // ---------- Beep (Web Audio, no external files) ----------
+  let audioCtx = null;
+  function beep() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } catch (e) { /* Web Audio no disponible, ignorar */ }
+  }
+
+  // ---------- Protocol editor ----------
+  const PRESETS = {
+    pomodoro: {
+      name: 'Pomodoro 25/5 x4',
+      repeats: 4,
+      phases: [
+        { name: 'Foco', minutes: 25, seconds: 0, uri: '' },
+        { name: 'Descanso', minutes: 5, seconds: 0, uri: '' }
+      ]
+    },
+    journaling: {
+      name: 'Journaling 3/3/3',
+      repeats: 1,
+      phases: [
+        { name: 'Gratitud', minutes: 3, seconds: 0, uri: '' },
+        { name: 'Reflexión', minutes: 3, seconds: 0, uri: '' },
+        { name: 'Intención', minutes: 3, seconds: 0, uri: '' }
+      ]
+    }
+  };
+
+  function renderPhaseList(phases) {
+    const list = document.getElementById('phase-list');
+    list.innerHTML = '';
+    phases.forEach(function(phase, idx) {
+      const item = document.createElement('div');
+      item.className = 'phase-item';
+      item.innerHTML =
+        '<div class="fields">' +
+          '<input type="text" data-field="name" placeholder="Nombre de fase" value="' + escapeAttr(phase.name) + '">' +
+          '<input type="number" data-field="minutes" placeholder="min" min="0" value="' + phase.minutes + '">' +
+          '<input type="number" data-field="seconds" placeholder="seg" min="0" max="59" value="' + phase.seconds + '">' +
+        '</div>' +
+        '<input type="text" data-field="uri" placeholder="Spotify URI (opcional) — spotify:playlist:... o spotify:track:..." value="' + escapeAttr(phase.uri || '') + '">' +
+        '<button class="remove-phase" data-idx="' + idx + '">Quitar fase</button>';
+      list.appendChild(item);
+    });
+
+    list.querySelectorAll('.remove-phase').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        const phases = readPhasesFromForm();
+        phases.splice(idx, 1);
+        renderPhaseList(phases);
+      });
+    });
+  }
+
+  function escapeAttr(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  function readPhasesFromForm() {
+    const items = document.querySelectorAll('#phase-list .phase-item');
+    const phases = [];
+    items.forEach(function(item) {
+      phases.push({
+        name: item.querySelector('[data-field="name"]').value || 'Fase',
+        minutes: parseInt(item.querySelector('[data-field="minutes"]').value, 10) || 0,
+        seconds: parseInt(item.querySelector('[data-field="seconds"]').value, 10) || 0,
+        uri: item.querySelector('[data-field="uri"]').value.trim()
+      });
+    });
+    return phases;
+  }
+
+  function loadProtocolIntoForm(protocol) {
+    document.getElementById('protocol-name').value = protocol.name;
+    document.getElementById('protocol-repeats').value = protocol.repeats;
+    renderPhaseList(protocol.phases);
+  }
+
+  function readProtocolFromForm() {
+    return {
+      name: document.getElementById('protocol-name').value || 'Protocolo',
+      repeats: parseInt(document.getElementById('protocol-repeats').value, 10) || 1,
+      phases: readPhasesFromForm()
+    };
+  }
+
+  document.getElementById('btn-add-phase').addEventListener('click', function() {
+    const phases = readPhasesFromForm();
+    phases.push({ name: '', minutes: 5, seconds: 0, uri: '' });
+    renderPhaseList(phases);
+  });
+
+  document.querySelectorAll('[data-preset]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const preset = PRESETS[btn.getAttribute('data-preset')];
+      loadProtocolIntoForm(JSON.parse(JSON.stringify(preset)));
+    });
+  });
+
+  // ---------- Saved presets (localStorage) ----------
+  function getSavedPresets() {
+    try {
+      const raw = localStorage.getItem('focus_timer_presets');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+
+  function setSavedPresets(presets) {
+    localStorage.setItem('focus_timer_presets', JSON.stringify(presets));
+  }
+
+  function renderSavedPresetsSelect() {
+    const presets = getSavedPresets();
+    const select = document.getElementById('saved-presets-select');
+    select.innerHTML = '';
+    const names = Object.keys(presets);
+    if (names.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = 'Sin presets guardados';
+      select.appendChild(opt);
+      return;
+    }
+    names.forEach(function(name) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+  }
+
+  document.getElementById('btn-save-preset').addEventListener('click', function() {
+    const protocol = readProtocolFromForm();
+    if (!protocol.name) { showTimerStatus('Ponele un nombre al protocolo primero.', 'error'); return; }
+    const presets = getSavedPresets();
+    presets[protocol.name] = protocol;
+    setSavedPresets(presets);
+    renderSavedPresetsSelect();
+    showTimerStatus('Preset "' + protocol.name + '" guardado.', 'ok');
+  });
+
+  document.getElementById('btn-load-preset').addEventListener('click', function() {
+    const select = document.getElementById('saved-presets-select');
+    const presets = getSavedPresets();
+    const protocol = presets[select.value];
+    if (!protocol) return;
+    loadProtocolIntoForm(JSON.parse(JSON.stringify(protocol)));
+  });
+
+  document.getElementById('btn-delete-preset').addEventListener('click', function() {
+    const select = document.getElementById('saved-presets-select');
+    const presets = getSavedPresets();
+    if (!presets[select.value]) return;
+    delete presets[select.value];
+    setSavedPresets(presets);
+    renderSavedPresetsSelect();
+  });
+
+  document.getElementById('btn-export').addEventListener('click', function() {
+    const protocol = readProtocolFromForm();
+    const blob = new Blob([JSON.stringify(protocol, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (protocol.name || 'protocolo').replace(/[^a-z0-9-_]+/gi, '_') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('btn-import-trigger').addEventListener('click', function() {
+    document.getElementById('btn-import').click();
+  });
+
+  document.getElementById('btn-import').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function() {
+      try {
+        const protocol = JSON.parse(reader.result);
+        if (!protocol.phases || !Array.isArray(protocol.phases)) throw new Error('JSON inválido');
+        loadProtocolIntoForm(protocol);
+        showTimerStatus('Protocolo importado.', 'ok');
+      } catch (err) {
+        showTimerStatus('Error importando: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  // ---------- Timer engine ----------
+  const TimerEngine = {
+    running: false,
+    paused: false,
+    schedule: [],      // flattened list of {name, totalSeconds, uri}
+    scheduleIndex: 0,
+    remainingSeconds: 0,
+    intervalId: null,
+
+    buildSchedule(protocol) {
+      const schedule = [];
+      for (let r = 0; r < protocol.repeats; r++) {
+        protocol.phases.forEach(function(phase) {
+          const total = (phase.minutes * 60) + phase.seconds;
+          if (total <= 0) return;
+          schedule.push({ name: phase.name, totalSeconds: total, uri: phase.uri });
+        });
+      }
+      return schedule;
+    },
+
+    start() {
+      if (this.running && this.paused) {
+        this.paused = false;
+        this.tick();
+        this.intervalId = setInterval(this.tick.bind(this), 1000);
+        setButtonsRunning();
+        return;
+      }
+
+      const protocol = readProtocolFromForm();
+      this.schedule = this.buildSchedule(protocol);
+      if (this.schedule.length === 0) {
+        showTimerStatus('Agregá al menos una fase con duración mayor a 0.', 'error');
+        return;
+      }
+
+      this.scheduleIndex = 0;
+      this.running = true;
+      this.paused = false;
+      this.enterPhase(0);
+      this.intervalId = setInterval(this.tick.bind(this), 1000);
+      setButtonsRunning();
+    },
+
+    enterPhase(idx) {
+      const phase = this.schedule[idx];
+      this.remainingSeconds = phase.totalSeconds;
+      document.getElementById('current-phase-name').textContent = phase.name;
+      updateNextPhaseLabel(idx, this.schedule);
+      updateTimeDisplay(this.remainingSeconds, phase.totalSeconds);
+      beep();
+      if (phase.uri) {
+        playOnDevice(phase.uri);
+      }
+    },
+
+    tick() {
+      if (this.paused) return;
+      this.remainingSeconds--;
+      const phase = this.schedule[this.scheduleIndex];
+      updateTimeDisplay(this.remainingSeconds, phase.totalSeconds);
+
+      if (this.remainingSeconds <= 0) {
+        this.scheduleIndex++;
+        if (this.scheduleIndex >= this.schedule.length) {
+          this.finish();
+          return;
+        }
+        this.enterPhase(this.scheduleIndex);
+      }
+    },
+
+    pause() {
+      this.paused = true;
+      clearInterval(this.intervalId);
+      setButtonsPaused();
+    },
+
+    reset() {
+      clearInterval(this.intervalId);
+      this.running = false;
+      this.paused = false;
+      this.schedule = [];
+      this.scheduleIndex = 0;
+      document.getElementById('current-phase-name').textContent = 'Sin protocolo cargado';
+      document.getElementById('time-display').textContent = '00:00';
+      document.getElementById('next-phase-label').textContent = '';
+      document.getElementById('progress-fill').style.width = '0%';
+      setButtonsIdle();
+    },
+
+    finish() {
+      clearInterval(this.intervalId);
+      this.running = false;
+      beep();
+      document.getElementById('current-phase-name').textContent = 'Protocolo completo';
+      document.getElementById('next-phase-label').textContent = '';
+      showTimerStatus('Protocolo terminado.', 'ok');
+      setButtonsIdle();
+    }
+  };
+
+  function updateTimeDisplay(remaining, total) {
+    const m = Math.floor(remaining / 60).toString().padStart(2, '0');
+    const s = (remaining % 60).toString().padStart(2, '0');
+    document.getElementById('time-display').textContent = m + ':' + s;
+    const pct = total > 0 ? Math.max(0, Math.min(100, ((total - remaining) / total) * 100)) : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+  }
+
+  function updateNextPhaseLabel(idx, schedule) {
+    const next = schedule[idx + 1];
+    document.getElementById('next-phase-label').textContent = next ? ('Siguiente: ' + next.name) : 'Última fase';
+  }
+
+  function setButtonsIdle() {
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-start').textContent = 'Iniciar';
+    document.getElementById('btn-pause').disabled = true;
+    document.getElementById('btn-reset').disabled = true;
+  }
+
+  function setButtonsRunning() {
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-pause').disabled = false;
+    document.getElementById('btn-pause').textContent = 'Pausar';
+    document.getElementById('btn-reset').disabled = false;
+  }
+
+  function setButtonsPaused() {
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-start').textContent = 'Reanudar';
+    document.getElementById('btn-pause').disabled = true;
+  }
+
+  document.getElementById('btn-start').addEventListener('click', function() {
+    TimerEngine.start();
+  });
+  document.getElementById('btn-pause').addEventListener('click', function() {
+    TimerEngine.pause();
+  });
+  document.getElementById('btn-reset').addEventListener('click', function() {
+    TimerEngine.reset();
+  });
+
+  // ---------- Init ----------
+  loadProtocolIntoForm(JSON.parse(JSON.stringify(PRESETS.pomodoro)));
+  renderSavedPresetsSelect();
+
+  const existingTokens = Tokens.get();
+  if (existingTokens) {
+    onSpotifyConnected();
+  } else {
+    onSpotifyDisconnected();
+  }
+  handleRedirectCallback();
+})();
+</script>
+</body>
+</html>
