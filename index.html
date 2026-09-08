@@ -263,7 +263,8 @@
       code_challenge_method: 'S256',
       code_challenge: challenge,
       scope: SCOPES,
-      state: state
+      state: state,
+      show_dialog: 'true'
     });
 
     window.location.href = AUTHORIZE_ENDPOINT + '?' + params.toString();
