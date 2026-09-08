@@ -677,12 +677,21 @@
   });
 
   // ---------- Timer engine ----------
+  // Se ancla al reloj real (Date.now()), no a la cuenta de ticks del setInterval:
+  // los navegadores demoran/saltean ticks cuando la pestaña queda de fondo o la
+  // pantalla se bloquea, y contar ticks hacía que las fases se "extendieran" en
+  // tiempo real. Recalcular contra Date.now() en cada tick se autocorrige solo,
+  // sin importar cuánto haya tardado el navegador en volver a ejecutar.
   const TimerEngine = {
     running: false,
     paused: false,
-    schedule: [],      // flattened list of {name, totalSeconds, uri}
-    scheduleIndex: 0,
+    schedule: [],       // flattened list of {name, totalSeconds, uri}
+    cumulative: [],      // segundo acumulado de fin de cada fase, relativo al arranque
+    scheduleIndex: -1,
     remainingSeconds: 0,
+    startedAt: 0,         // Date.now() cuando arrancó el protocolo
+    pausedAt: 0,
+    pauseOffsetMs: 0,      // tiempo total acumulado en pausa, se descuenta del elapsed
     intervalId: null,
 
     buildSchedule(protocol) {
@@ -699,6 +708,7 @@
 
     start() {
       if (this.running && this.paused) {
+        this.pauseOffsetMs += Date.now() - this.pausedAt;
         this.paused = false;
         this.tick();
         this.intervalId = setInterval(this.tick.bind(this), 1000);
@@ -713,20 +723,26 @@
         return;
       }
 
-      this.scheduleIndex = 0;
+      let acc = 0;
+      this.cumulative = this.schedule.map(function(phase) {
+        acc += phase.totalSeconds;
+        return acc;
+      });
+
+      this.scheduleIndex = -1;
       this.running = true;
       this.paused = false;
-      this.enterPhase(0);
+      this.startedAt = Date.now();
+      this.pauseOffsetMs = 0;
+      this.tick();
       this.intervalId = setInterval(this.tick.bind(this), 1000);
       setButtonsRunning();
     },
 
     enterPhase(idx) {
       const phase = this.schedule[idx];
-      this.remainingSeconds = phase.totalSeconds;
       document.getElementById('current-phase-name').textContent = phase.name;
       updateNextPhaseLabel(idx, this.schedule);
-      updateTimeDisplay(this.remainingSeconds, phase.totalSeconds);
       beep();
       if (phase.uri) {
         playOnDevice(phase.uri);
@@ -735,22 +751,30 @@
 
     tick() {
       if (this.paused) return;
-      this.remainingSeconds--;
-      const phase = this.schedule[this.scheduleIndex];
-      updateTimeDisplay(this.remainingSeconds, phase.totalSeconds);
+      const elapsedSec = Math.floor((Date.now() - this.startedAt - this.pauseOffsetMs) / 1000);
 
-      if (this.remainingSeconds <= 0) {
-        this.scheduleIndex++;
-        if (this.scheduleIndex >= this.schedule.length) {
-          this.finish();
-          return;
-        }
-        this.enterPhase(this.scheduleIndex);
+      let idx = 0;
+      while (idx < this.cumulative.length && elapsedSec >= this.cumulative[idx]) idx++;
+
+      if (idx >= this.schedule.length) {
+        this.finish();
+        return;
       }
+
+      if (idx !== this.scheduleIndex) {
+        this.scheduleIndex = idx;
+        this.enterPhase(idx);
+      }
+
+      const phase = this.schedule[idx];
+      const phaseStartSec = idx === 0 ? 0 : this.cumulative[idx - 1];
+      this.remainingSeconds = Math.max(0, phase.totalSeconds - (elapsedSec - phaseStartSec));
+      updateTimeDisplay(this.remainingSeconds, phase.totalSeconds);
     },
 
     pause() {
       this.paused = true;
+      this.pausedAt = Date.now();
       clearInterval(this.intervalId);
       setButtonsPaused();
     },
@@ -760,7 +784,8 @@
       this.running = false;
       this.paused = false;
       this.schedule = [];
-      this.scheduleIndex = 0;
+      this.cumulative = [];
+      this.scheduleIndex = -1;
       document.getElementById('current-phase-name').textContent = 'Sin protocolo cargado';
       document.getElementById('time-display').textContent = '00:00';
       document.getElementById('next-phase-label').textContent = '';
@@ -778,6 +803,13 @@
       setButtonsIdle();
     }
   };
+
+  // Al volver a la pestaña, recalcula al instante en vez de esperar el próximo tick natural.
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && TimerEngine.running && !TimerEngine.paused) {
+      TimerEngine.tick();
+    }
+  });
 
   function updateTimeDisplay(remaining, total) {
     const m = Math.floor(remaining / 60).toString().padStart(2, '0');
